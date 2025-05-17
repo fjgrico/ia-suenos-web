@@ -1,91 +1,63 @@
 import streamlit as st
 import os
-from audiorecorder import audiorecorder
-from openai import OpenAI
-from tempfile import NamedTemporaryFile
+import requests
+import tempfile
+from streamlit_audiorecorder import audiorecorder
+from utils_gpt import interpretar_sueno
+from utils_audio import reproducir_texto_en_audio
 
-# 🔐 Cargar API key desde entorno o secrets
-api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
-if not api_key:
-    st.error("API key no encontrada")
-    st.stop()
-client = OpenAI(api_key=api_key)
-
-# 🎨 Configurar página
-st.set_page_config(page_title="💤 Suenia | Interpretador de Sueños", layout="centered")
+# --- Configuración de página ---
+st.set_page_config(page_title="💤 Suenia", layout="centered")
 st.markdown("<h1 style='text-align: center;'>💤 Suenia</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center;'>Interpreta tus sueños con Inteligencia Artificial</h3>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Interpreta tus sueños con IA</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 1️⃣ Grabación de voz
+# --- 1️⃣ Grabación de voz (aparece primero) ---
 st.subheader("🎙️ Graba tu sueño con tu voz")
-audio = audiorecorder("🎤 Iniciar grabación", "⏹️ Detener grabación", key="grabadora")
+audio_bytes = audiorecorder("🎤 Iniciar grabación", "⏹️ Detener grabación", key="recorder")
 
-texto = ""
-if isinstance(audio, (bytes, bytearray)) and len(audio) > 0:
-    # Reproducir lo grabado
-    st.audio(audio, format="audio/wav")
-    # Guardar y transcribir
-    with NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-        tmp_file.write(audio)
-        tmp_path = tmp_file.name
+texto_transcrito = ""
+if isinstance(audio_bytes, (bytes, bytearray)) and len(audio_bytes) > 0:
+    # Mostrar reproductor del audio que acabas de grabar
+    st.audio(audio_bytes, format="audio/wav")
+    # Guardar a fichero temporal para enviar al backend
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(audio_bytes)
+        ruta_audio = tmp.name
+    # Enviar al backend
     with st.spinner("🎧 Transcribiendo tu audio..."):
-        transcription = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=open(tmp_path, "rb"),
-            response_format="text"
+        resp = requests.post(
+            "https://grabador-backend.onrender.com/transcribir",
+            files={"audio": open(ruta_audio, "rb")}
         )
-    texto = transcription.strip()
-    st.success("✅ Transcripción lista")
+        if resp.status_code == 200:
+            texto_transcrito = resp.json().get("transcripcion", "").strip()
+            st.success("✅ Transcripción lista")
+        else:
+            st.error(f"❌ Error {resp.status_code} al transcribir")
 
-# 2️⃣ Cuadro de texto editable
+# --- 2️⃣ Caja de texto editable (después de grabar) ---
 st.subheader("✍️ Escribe o revisa aquí tu sueño")
-if "texto_sueno" not in st.session_state:
-    st.session_state.texto_sueno = texto
-sueno_editado = st.text_area("📝 Tu sueño:", value=st.session_state.texto_sueno or texto, height=150, key="input_sueno")
-st.session_state.texto_sueno = sueno_editado
+sueno = st.text_area("📝 Tu sueño:", value=texto_transcrito, height=150, key="input_sueno")
 
-# 3️⃣ Interpretación
+# --- 3️⃣ Botón de interpretación ---
 st.markdown("---")
-st.subheader("🔮 Interpretar el sueño")
-if st.button("✨ Analizar sueño con IA", key="interpretar_btn"):
-    if not sueno_editado.strip():
+if st.button("🔮 Interpretar el sueño"):
+    if not sueno.strip():
         st.warning("Por favor, graba o escribe tu sueño antes de interpretar.")
     else:
-        with st.spinner("🧠 Analizando..."):
-            prompt = f"""
-Eres un intérprete de sueños experto. A partir de este sueño:
-'''{sueno_editado}'''
+        with st.spinner("🧠 Analizando con IA..."):
+            interpretacion = interpretar_sueno(sueno)
+        st.markdown("### 🧠 Interpretación del Sueño")
+        st.write(interpretacion)
+        if st.checkbox("🔊 Escuchar interpretación"):
+            audio_file = reproducir_texto_en_audio(interpretacion)
+            if audio_file:
+                st.audio(audio_file)
 
-Proporciona interpretaciones:
-1. Freudiana
-2. Jungiana
-3. Emocional
-4. Espiritual
-5. Chamánica
-6. Taoísta/Budista
-7. Nativo Americano (Hopi)
-8. Africana Ancestral
-9. Profesional/Vocacional
-10. Familiar y Amorosa
-
-Después, incluye:
-- Conclusión general
-- Reflexión personal
-- Tres preguntas finales
-"""
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "Eres un experto analista de sueños."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.85
-            )
-            interpretacion = response.choices[0].message.content
-        st.markdown("## 🧠 Interpretación completa")
-        st.markdown(interpretacion)
-
-# Footer
+# --- Footer ---
 st.markdown("---")
-st.markdown("<small>🔗 Suenia – Interpretador de sueños con IA | Mentor Digital Pro</small>", unsafe_allow_html=True)
+st.markdown(
+    "<small>🔗 Suenia – Interpretador de sueños con IA | Mentor Digital Pro</small>",
+    unsafe_allow_html=True
+)

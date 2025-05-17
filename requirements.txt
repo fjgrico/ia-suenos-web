@@ -1,3 +1,6 @@
 streamlit
 streamlit-audiorecorder
-openai>=1.2.0
+requests
+openai
+gTTS
+soundfile
