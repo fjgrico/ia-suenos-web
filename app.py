@@ -1,58 +1,61 @@
 import streamlit as st
-import base64
 import requests
 import tempfile
-from audio_recorder_component import audio_recorder
+from streamlit_audiorecorder import audiorecorder
 from utils_gpt import interpretar_sueno
 from utils_audio import reproducir_texto_en_audio
 
 st.set_page_config(page_title="💤 Suenia | Interpretación de Sueños", layout="centered")
 
+# Título de la app
 st.markdown("<h1 style='text-align: center;'>💤 Suenia</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center;'>Interpreta tus sueños con IA</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Interpreta tus sueños con Inteligencia Artificial</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 1️⃣ GRABACIÓN DE VOZ
+# 1️⃣ Grabación de voz
 st.subheader("🎙️ Graba tu sueño con tu voz")
-audio_base64 = audio_recorder()
 
-# Solo mostrar el botón de detener si el componente devuelve base64
-usar_audio = isinstance(audio_base64, str) and len(audio_base64) > 0
+# Usamos streamlit-audiorecorder para capturar bytes de audio
+audio_bytes = audiorecorder("Iniciar grabación", "Detener grabación", key="recorder")
 
-# 2️⃣ TRANSCRIPCIÓN Y EDITAR TEXTO
-st.subheader("✍️ Escribe o revisa aquí tu sueño")
+# Validar si hay audio grabado
+usar_audio = isinstance(audio_bytes, (bytes, bytearray)) and len(audio_bytes) > 0
+
+# 2️⃣ Transcripción y edición de texto
+st.subheader("📝 Transcripción / Edita tu sueño aquí")
 if usar_audio:
-    # Convertir base64 a texto transcrito
     try:
-        audio_bytes = base64.b64decode(audio_base64)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as f:
-            f.write(audio_bytes)
-            ruta = f.name
+        # Guardar temporalmente como WAV
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+            tmpfile.write(audio_bytes)
+            audio_path = tmpfile.name
 
-        files = {"audio": open(ruta, "rb")}
-        resp = requests.post("https://grabador-backend.onrender.com/transcribir", files=files)
-        resp.raise_for_status()
-        texto = resp.json().get("transcripcion", "")
+        # Enviar al backend para transcribir
+        files = {"audio": open(audio_path, 'rb')}
+        response = requests.post("https://grabador-backend.onrender.com/transcribir", files=files)
+        response.raise_for_status()
+        texto = response.json().get("transcripcion", "").strip()
     except Exception as e:
-        st.error(f"❌ No se pudo transcribir: {e}")
+        st.error(f"❌ Error al transcribir audio: {e}")
         texto = ""
 else:
     texto = ""
 
-# Caja de texto editable con la transcripción (o vacía si no hay)
-sueno = st.text_area("📝 Tu sueño:", value=texto, height=150)
+# Caja de texto editable con la transcripción o vacía
+sueno = st.text_area("Escribe o corrige tu sueño:", value=texto, height=150)
 
-# 3️⃣ BOTÓN PARA INTERPRETAR
+# 3️⃣ Botón para interpretar
 if st.button("🔮 Interpretar el sueño"):
     if not sueno.strip():
-        st.warning("Escribe o graba tu sueño antes de interpretar.")
+        st.warning("Por favor, graba o escribe tu sueño antes de interpretar.")
     else:
-        with st.spinner("Analizando..."):
+        with st.spinner("Interpretando..."):
             interpretacion = interpretar_sueno(sueno)
-        st.markdown("### 🧠 Interpretación")
+        # Mostrar interpretación
+        st.markdown("### 🧠 Interpretación del Sueño:")
         st.write(interpretacion)
-
-        if st.checkbox("🔊 Escuchar interpretación"):
+        # Opción de escuchar la interpretación
+        if st.checkbox("🔊 Escuchar interpretación en voz"):
             audio_file = reproducir_texto_en_audio(interpretacion)
             if audio_file:
                 st.audio(audio_file)
